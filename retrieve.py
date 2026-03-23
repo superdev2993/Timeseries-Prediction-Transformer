@@ -4,6 +4,7 @@ import json
 import pandas as pd
 import matplotlib.pyplot as plt
 import lightgbm as lgb
+from numerai_tools.scoring import numerai_corr, correlation_contribution
 
 
 
@@ -142,3 +143,57 @@ validation = validation[~validation["era"].isin(eras_to_embargo)]
 validation["prediction"] = model.predict(validation[feature_set])
 validation[["era", "prediction", "target"]]
 print(validation)
+
+
+# Download and join in the meta_model for the validation eras
+napi.download_dataset(f"v4.3/meta_model.parquet", round_num=842)
+validation["meta_model"] = pd.read_parquet(
+    f"v4.3/meta_model.parquet"
+)["numerai_meta_model"]
+
+# Compute the per-era corr between our predictions and the target values
+per_era_corr = validation.groupby("era").apply(
+    lambda x: numerai_corr(x[["prediction"]].dropna(), x["target"].dropna())
+)
+
+# Compute the per-era mmc between our predictions, the meta model, and the target values
+per_era_mmc = validation.dropna().groupby("era").apply(
+    lambda x: correlation_contribution(x[["prediction"]], x["meta_model"], x["target"])
+)
+
+
+# Plot the per-era correlation
+per_era_corr.plot(
+  title="Validation CORR",
+  kind="bar",
+  figsize=(8, 4),
+  xticks=[],
+  legend=False,
+  snap=False
+)
+per_era_mmc.plot(
+  title="Validation MMC",
+  kind="bar",
+  figsize=(8, 4),
+  xticks=[],
+  legend=False,
+  snap=False
+)
+
+# Compute performance metrics
+corr_mean = per_era_corr.mean()
+corr_std = per_era_corr.std(ddof=0)
+corr_sharpe = corr_mean / corr_std
+corr_max_drawdown = (per_era_corr.cumsum().expanding(min_periods=1).max() - per_era_corr.cumsum()).max()
+
+mmc_mean = per_era_mmc.mean()
+mmc_std = per_era_mmc.std(ddof=0)
+mmc_sharpe = mmc_mean / mmc_std
+mmc_max_drawdown = (per_era_mmc.cumsum().expanding(min_periods=1).max() - per_era_mmc.cumsum()).max()
+
+pd.DataFrame({
+    "mean": [corr_mean, mmc_mean],
+    "std": [corr_std, mmc_std],
+    "sharpe": [corr_sharpe, mmc_sharpe],
+    "max_drawdown": [corr_max_drawdown, mmc_max_drawdown]
+}, index=["CORR", "MMC"]).T
