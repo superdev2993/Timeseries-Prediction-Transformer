@@ -1,0 +1,8 @@
+numerapi 
+pandas 
+pyarrow 
+matplotlib 
+lightgbm 
+scikit-learn 
+scipy 
+cloudpickle==3.1.1
